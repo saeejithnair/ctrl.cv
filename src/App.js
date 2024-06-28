@@ -4,6 +4,26 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import FileTypeSelector from './components/FileTypeSelector';
 import { fetchRepo } from './services/api';
 
+const Logo = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 100" style={{ width: '200px', height: 'auto' }}>
+        <style>
+            {`
+        .text { font-family: Arial, sans-serif; font-weight: bold; }
+        .ctrl { fill: #0066cc; }
+        .cv { fill: #3399ff; }
+        .clipboard { fill: #ffffff; stroke: #0066cc; stroke-width: 3; }
+        .plus { fill: none; stroke: #0066cc; stroke-width: 3; stroke-linecap: round; }
+      `}
+        </style>
+        <rect className="clipboard" x="130" y="28" width="40" height="54" rx="4" />
+        <rect className="clipboard" x="138" y="20" width="24" height="16" rx="3" />
+        <line className="plus" x1="150" y1="42" x2="150" y2="68" />
+        <line className="plus" x1="137" y1="55" x2="163" y2="55" />
+        <text x="15" y="70" className="text ctrl" fontSize="60">ctrl</text>
+        <text x="185" y="70" className="text cv" fontSize="60">cv</text>
+    </svg>
+);
+
 const App = () => {
     const [repoUrl, setRepoUrl] = useState('');
     const [fileTypes, setFileTypes] = useState({ includeTypes: [], excludeTypes: [] });
@@ -63,11 +83,9 @@ const App = () => {
     return (
         <Container maxWidth="md">
             <Box sx={{ textAlign: 'center', my: 4 }}>
-                <Typography variant="h2" component="h1" gutterBottom>
-                    ctrl.cv
-                </Typography>
+                <Logo />
                 <Typography variant="h5" component="h2" gutterBottom>
-                    Copy repos, paste knowledge
+                    copy repos, paste knowledge
                 </Typography>
             </Box>
             <Box component="form" onSubmit={handleSubmit} sx={{ mb: 4 }}>
