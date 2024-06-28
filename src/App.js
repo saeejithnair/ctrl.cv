@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { Container, Typography, TextField, Button, Box, LinearProgress } from '@mui/material';
+import React, { useState, useCallback } from 'react';
+import { Container, Typography, TextField, Button, Box, LinearProgress, Snackbar } from '@mui/material';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import FileTypeSelector from './components/FileTypeSelector';
 import { fetchRepo } from './services/api';
 
@@ -10,6 +11,7 @@ const App = () => {
     const [filteredContent, setFilteredContent] = useState('');
     const [error, setError] = useState('');
     const [loadingStatus, setLoadingStatus] = useState('');
+    const [showCopyNotification, setShowCopyNotification] = useState(false);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -28,7 +30,7 @@ const App = () => {
         }
     };
 
-    const applyFilters = () => {
+    const applyFilters = useCallback(() => {
         if (!allFiles) return;
 
         setLoadingStatus('Applying filters...');
@@ -42,13 +44,21 @@ const App = () => {
         const content = filteredFiles.map(([path, file]) => `File: ${path}\n\n${file.content}\n\n`).join('\n');
         setFilteredContent(content);
         setLoadingStatus('');
-    };
+    }, [allFiles, fileTypes]);
 
     React.useEffect(() => {
         if (allFiles) {
             applyFilters();
         }
-    }, [fileTypes, allFiles]);
+    }, [fileTypes, allFiles, applyFilters]);
+
+    const handleCopyToClipboard = () => {
+        navigator.clipboard.writeText(filteredContent).then(() => {
+            setShowCopyNotification(true);
+        }, (err) => {
+            console.error('Could not copy text: ', err);
+        });
+    };
 
     return (
         <Container maxWidth="md">
@@ -99,12 +109,29 @@ const App = () => {
             )}
             {filteredContent && (
                 <Box>
-                    <Typography variant="h6" gutterBottom>Filtered Content:</Typography>
-                    <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: '500px', overflow: 'auto' }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                        <Typography variant="h6">Filtered Content:</Typography>
+                        <Button
+                            variant="contained"
+                            color="secondary"
+                            startIcon={<ContentCopyIcon />}
+                            onClick={handleCopyToClipboard}
+                        >
+                            Copy to Clipboard
+                        </Button>
+                    </Box>
+                    <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: '500px', overflow: 'auto', background: '#f5f5f5', padding: '15px', borderRadius: '4px' }}>
                         {filteredContent}
                     </pre>
                 </Box>
             )}
+            <Snackbar
+                anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+                open={showCopyNotification}
+                onClose={() => setShowCopyNotification(false)}
+                message="Content copied to clipboard!"
+                autoHideDuration={3000}
+            />
         </Container>
     );
 };
