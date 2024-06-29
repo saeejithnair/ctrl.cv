@@ -7,7 +7,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
+CORS(
+    app,
+    resources={r"/api/*": {"origins": "https://ctrl-cv.netlify.app"}},
+)
+
 
 github_service = GitHubService(os.getenv("GITHUB_TOKEN"))
 
