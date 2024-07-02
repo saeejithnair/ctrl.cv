@@ -30,7 +30,8 @@ const App = () => {
     const [allFiles, setAllFiles] = useState(null);
     const [filteredContent, setFilteredContent] = useState('');
     const [error, setError] = useState('');
-    const [loadingStatus, setLoadingStatus] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+    const [isFiltering, setIsFiltering] = useState(false);
     const [showCopyNotification, setShowCopyNotification] = useState(false);
     const [commitHash, setCommitHash] = useState('');
 
@@ -40,23 +41,23 @@ const App = () => {
         setFilteredContent('');
         setAllFiles(null);
         setCommitHash('');
-        setLoadingStatus('Fetching repository contents...');
+        setIsLoading(true);
 
         try {
             const response = await fetchRepo(repoUrl);
             setAllFiles(response.files);
             setCommitHash(response.commitHash);
-            setLoadingStatus('Repository fetched. Apply filters to trim content.');
         } catch (err) {
             setError(err.message || "An unknown error occurred");
-            setLoadingStatus('');
+        } finally {
+            setIsLoading(false);
         }
     };
 
     const applyFilters = useCallback(() => {
         if (!allFiles) return;
 
-        setLoadingStatus('Applying filters...');
+        setIsFiltering(true);
         const filteredFiles = Object.entries(allFiles).filter(([path, file]) => {
             if (fileTypes.includeTypes.length > 0) {
                 return fileTypes.includeTypes.includes(file.type);
@@ -66,7 +67,7 @@ const App = () => {
 
         const content = filteredFiles.map(([path, file]) => `File: ${path}\n\n${file.content}\n\n`).join('\n');
         setFilteredContent(content);
-        setLoadingStatus('');
+        setIsFiltering(false);
     }, [allFiles, fileTypes]);
 
     React.useEffect(() => {
@@ -106,15 +107,15 @@ const App = () => {
                     color="primary"
                     fullWidth
                     sx={{ mt: 2 }}
-                    disabled={loadingStatus !== ''}
+                    disabled={isLoading}
                 >
-                    Fetch Repository
+                    {isLoading ? 'Fetching...' : 'Fetch Repository'}
                 </Button>
             </Box>
-            {loadingStatus && (
+            {isLoading && (
                 <Box sx={{ width: '100%', mb: 2 }}>
                     <LinearProgress />
-                    <Typography variant="body2" sx={{ mt: 1 }}>{loadingStatus}</Typography>
+                    <Typography variant="body2" sx={{ mt: 1 }}>Fetching repository contents...</Typography>
                 </Box>
             )}
             {commitHash && (
@@ -123,10 +124,13 @@ const App = () => {
                 </Typography>
             )}
             {allFiles && (
-                <FileTypeSelector
-                    onSelectionChange={setFileTypes}
-                    availableTypes={[...new Set(Object.values(allFiles).map(file => file.type))]}
-                />
+                <>
+                    <FileTypeSelector
+                        onSelectionChange={setFileTypes}
+                        availableTypes={[...new Set(Object.values(allFiles).map(file => file.type))]}
+                    />
+                    {isFiltering && <Typography variant="body2">Applying filters...</Typography>}
+                </>
             )}
             {error && (
                 <Typography color="error" sx={{ mb: 2 }}>
@@ -163,3 +167,4 @@ const App = () => {
 };
 
 export default App;
+
