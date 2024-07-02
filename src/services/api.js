@@ -1,6 +1,10 @@
 import axios from 'axios';
 
-const API_BASE_URL = 'https://ctrl-cv-5853f5fee6a3.herokuapp.com/api';
+// const API_BASE_URL = 'https://ctrl-cv-5853f5fee6a3.herokuapp.com/api';
+// const API_BASE_URL = 'http://127.0.0.1:5001/api';
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL;
+
+
 
 export const fetchRepo = async (repoUrl) => {
     try {

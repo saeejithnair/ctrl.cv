@@ -85,7 +85,7 @@ const App = () => {
             <Box sx={{ textAlign: 'center', my: 4 }}>
                 <Logo />
                 <Typography variant="h5" component="h2" gutterBottom>
-                    copy repos, paste knowledge
+                    copy paste url. concatenate repo into one file. copy paste into llm.
                 </Typography>
             </Box>
             <Box component="form" onSubmit={handleSubmit} sx={{ mb: 4 }}>

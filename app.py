@@ -5,12 +5,12 @@ import os
 from dotenv import load_dotenv
 
 load_dotenv()
+env = os.getenv("ENV", "production")  # Default to 'production' if not specified
+load_dotenv(f".env.{env}")
 
 app = Flask(__name__)
-CORS(
-    app,
-    resources={r"/api/*": {"origins": "https://ctrl-cv.netlify.app"}},
-)
+cors_origins = os.getenv("CORS_ORIGINS", "*")  # Fallback to allow all if not specified
+CORS(app, resources={r"/api/*": {"origins": cors_origins}})
 
 
 github_service = GitHubService(os.getenv("GITHUB_TOKEN"))
@@ -32,5 +32,6 @@ def fetch_repo():
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("BACKEND_PORT", 5001))
     app.run(host="0.0.0.0", port=port)
+    # app.run(debug=True)
