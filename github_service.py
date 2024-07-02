@@ -21,8 +21,8 @@ class GitHubService:
         return owner, repo, commit_hash
 
     @lru_cache(maxsize=100)
-    def get_repo_contents(self, repo_url):
-        owner, repo, commit_hash = self.parse_github_url(repo_url)
+    def get_repo_contents(self, repo_url, commit_hash):
+        owner, repo, _ = self.parse_github_url(repo_url)
 
         if not commit_hash:
             commits_url = f"{self.api_base_url}/repos/{owner}/{repo}/commits"
@@ -48,8 +48,9 @@ class GitHubService:
                     }
                 )
 
-        return contents, commit_hash
+        return contents
 
+    @lru_cache(maxsize=1000)
     def get_file_content(self, owner, repo, file_path, commit_hash):
         url = f"{self.api_base_url}/repos/{owner}/{repo}/contents/{file_path}?ref={commit_hash}"
         response = requests.get(url, headers=self.headers)
@@ -66,7 +67,13 @@ class GitHubService:
     def get_repo_data(self, repo_url):
         owner, repo, commit_hash = self.parse_github_url(repo_url)
 
-        contents, commit_hash = self.get_repo_contents(repo_url)
+        if not commit_hash:
+            commits_url = f"{self.api_base_url}/repos/{owner}/{repo}/commits"
+            response = requests.get(commits_url, headers=self.headers)
+            response.raise_for_status()
+            commit_hash = response.json()[0]["sha"]
+
+        contents = self.get_repo_contents(repo_url, commit_hash)
 
         file_contents = {}
         for file in contents:

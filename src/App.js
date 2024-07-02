@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { Container, Typography, TextField, Button, Box, LinearProgress, Snackbar } from '@mui/material';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import FileTypeSelector from './components/FileTypeSelector';
@@ -35,20 +35,32 @@ const App = () => {
     const [showCopyNotification, setShowCopyNotification] = useState(false);
     const [commitHash, setCommitHash] = useState('');
 
+    // Use a ref to store the cache as it doesn't need to trigger re-renders
+    const cacheRef = useRef({});
+
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
-        setFilteredContent('');
-        setAllFiles(null);
-        setCommitHash('');
         setIsLoading(true);
 
         try {
-            const response = await fetchRepo(repoUrl);
-            setAllFiles(response.files);
-            setCommitHash(response.commitHash);
+            let data;
+            if (cacheRef.current[repoUrl]) {
+                data = cacheRef.current[repoUrl];
+            } else {
+                const response = await fetchRepo(repoUrl);
+                data = response;
+                // Cache the fetched data
+                cacheRef.current[repoUrl] = data;
+            }
+
+            setAllFiles(data.files);
+            setCommitHash(data.commitHash);
         } catch (err) {
             setError(err.message || "An unknown error occurred");
+            setAllFiles(null);
+            setCommitHash('');
+            setFilteredContent('');
         } finally {
             setIsLoading(false);
         }
@@ -70,11 +82,11 @@ const App = () => {
         setIsFiltering(false);
     }, [allFiles, fileTypes]);
 
-    React.useEffect(() => {
+    useEffect(() => {
         if (allFiles) {
             applyFilters();
         }
-    }, [fileTypes, allFiles, applyFilters]);
+    }, [allFiles, applyFilters]);
 
     const handleCopyToClipboard = () => {
         navigator.clipboard.writeText(filteredContent).then(() => {
@@ -167,4 +179,3 @@ const App = () => {
 };
 
 export default App;
-
