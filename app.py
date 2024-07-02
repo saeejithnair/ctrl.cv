@@ -25,8 +25,8 @@ def fetch_repo():
         return jsonify({"error": "Repository URL is required"}), 400
 
     try:
-        file_contents = github_service.get_repo_data(repo_url)
-        return jsonify({"files": file_contents})
+        file_contents, commit_hash = github_service.get_repo_data(repo_url)
+        return jsonify({"files": file_contents, "commit_hash": commit_hash})
     except Exception as e:
         return jsonify({"error": f"Error fetching repository: {str(e)}"}), 500
 

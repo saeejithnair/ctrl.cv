@@ -11,18 +11,26 @@ class GitHubService:
         self.headers = {"Authorization": f"token {self.token}"}
         self.max_file_size = 1024 * 1024  # 1 MB limit
 
-    @lru_cache(maxsize=100)
-    def get_repo_contents(self, repo_url):
+    def parse_github_url(self, repo_url):
         parsed_url = urlparse(repo_url)
         path_parts = parsed_url.path.strip("/").split("/")
         owner, repo = path_parts[0], path_parts[1]
+        commit_hash = None
+        if len(path_parts) > 3 and path_parts[2] == "tree":
+            commit_hash = path_parts[3]
+        return owner, repo, commit_hash
 
-        commits_url = f"{self.api_base_url}/repos/{owner}/{repo}/commits"
-        response = requests.get(commits_url, headers=self.headers)
-        response.raise_for_status()
-        latest_commit_sha = response.json()[0]["sha"]
+    @lru_cache(maxsize=100)
+    def get_repo_contents(self, repo_url):
+        owner, repo, commit_hash = self.parse_github_url(repo_url)
 
-        tree_url = f"{self.api_base_url}/repos/{owner}/{repo}/git/trees/{latest_commit_sha}?recursive=1"
+        if not commit_hash:
+            commits_url = f"{self.api_base_url}/repos/{owner}/{repo}/commits"
+            response = requests.get(commits_url, headers=self.headers)
+            response.raise_for_status()
+            commit_hash = response.json()[0]["sha"]
+
+        tree_url = f"{self.api_base_url}/repos/{owner}/{repo}/git/trees/{commit_hash}?recursive=1"
         response = requests.get(tree_url, headers=self.headers)
         response.raise_for_status()
         tree = response.json()
@@ -40,11 +48,10 @@ class GitHubService:
                     }
                 )
 
-        return contents
+        return contents, commit_hash
 
-    @lru_cache(maxsize=1000)
-    def get_file_content(self, owner, repo, file_path, file_sha):
-        url = f"{self.api_base_url}/repos/{owner}/{repo}/contents/{file_path}"
+    def get_file_content(self, owner, repo, file_path, commit_hash):
+        url = f"{self.api_base_url}/repos/{owner}/{repo}/contents/{file_path}?ref={commit_hash}"
         response = requests.get(url, headers=self.headers)
         response.raise_for_status()
         content = response.json()["content"]
@@ -57,18 +64,16 @@ class GitHubService:
             return f"Binary file: {file_path} (size: {len(decoded_content)} bytes)"
 
     def get_repo_data(self, repo_url):
-        parsed_url = urlparse(repo_url)
-        path_parts = parsed_url.path.strip("/").split("/")
-        owner, repo = path_parts[0], path_parts[1]
+        owner, repo, commit_hash = self.parse_github_url(repo_url)
 
-        contents = self.get_repo_contents(repo_url)
+        contents, commit_hash = self.get_repo_contents(repo_url)
 
         file_contents = {}
         for file in contents:
             if file["type"] == "file":
                 try:
                     content = self.get_file_content(
-                        owner, repo, file["path"], file["sha"]
+                        owner, repo, file["path"], commit_hash
                     )
                     file_contents[file["path"]] = {
                         "content": content,
@@ -90,4 +95,4 @@ class GitHubService:
                         "size": file["size"],
                     }
 
-        return file_contents
+        return file_contents, commit_hash

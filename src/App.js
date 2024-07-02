@@ -32,18 +32,21 @@ const App = () => {
     const [error, setError] = useState('');
     const [loadingStatus, setLoadingStatus] = useState('');
     const [showCopyNotification, setShowCopyNotification] = useState(false);
+    const [commitHash, setCommitHash] = useState('');
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
         setFilteredContent('');
         setAllFiles(null);
+        setCommitHash('');
         setLoadingStatus('Fetching repository contents...');
 
         try {
             const response = await fetchRepo(repoUrl);
             setAllFiles(response.files);
-            setLoadingStatus('Repository fetched. Apply filters to view content.');
+            setCommitHash(response.commitHash);
+            setLoadingStatus('Repository fetched. Apply filters to trim content.');
         } catch (err) {
             setError(err.message || "An unknown error occurred");
             setLoadingStatus('');
@@ -113,6 +116,11 @@ const App = () => {
                     <LinearProgress />
                     <Typography variant="body2" sx={{ mt: 1 }}>{loadingStatus}</Typography>
                 </Box>
+            )}
+            {commitHash && (
+                <Typography variant="body2" sx={{ mt: 2, mb: 2 }}>
+                    Commit Hash: {commitHash}
+                </Typography>
             )}
             {allFiles && (
                 <FileTypeSelector
