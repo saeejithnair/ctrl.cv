@@ -1,8 +1,9 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { Container, Typography, TextField, Button, Box, LinearProgress, Snackbar } from '@mui/material';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import FileTypeSelector from './components/FileTypeSelector';
-import { fetchRepo } from './services/api';
+import FileTree from './components/FileTree';
+import { fetchRepoStructure, fetchSelectedFiles } from './services/api';
 
 const Logo = () => (
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 100" style={{ width: '200px', height: 'auto' }}>
@@ -27,16 +28,13 @@ const Logo = () => (
 const App = () => {
     const [repoUrl, setRepoUrl] = useState('');
     const [fileTypes, setFileTypes] = useState({ includeTypes: [], excludeTypes: [] });
-    const [allFiles, setAllFiles] = useState(null);
+    const [repoStructure, setRepoStructure] = useState(null);
+    const [selectedFiles, setSelectedFiles] = useState({});
     const [filteredContent, setFilteredContent] = useState('');
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
-    const [isFiltering, setIsFiltering] = useState(false);
     const [showCopyNotification, setShowCopyNotification] = useState(false);
     const [commitHash, setCommitHash] = useState('');
-
-    // Use a ref to store the cache as it doesn't need to trigger re-renders
-    const cacheRef = useRef({});
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -44,21 +42,24 @@ const App = () => {
         setIsLoading(true);
 
         try {
-            let data;
-            if (cacheRef.current[repoUrl]) {
-                data = cacheRef.current[repoUrl];
-            } else {
-                const response = await fetchRepo(repoUrl);
-                data = response;
-                // Cache the fetched data
-                cacheRef.current[repoUrl] = data;
-            }
-
-            setAllFiles(data.files);
+            const data = await fetchRepoStructure(repoUrl);
+            setRepoStructure(data.structure);
             setCommitHash(data.commitHash);
+            // Initialize all files as unchecked
+            const initialSelectedFiles = {};
+            const initializeUnchecked = (node, path = '') => {
+                const currentPath = path ? `${path}/${node.name}` : node.name;
+                if (node.type === 'file') {
+                    initialSelectedFiles[currentPath] = false;
+                } else if (node.type === 'directory') {
+                    node.children.forEach(child => initializeUnchecked(child, currentPath));
+                }
+            };
+            data.structure.forEach(node => initializeUnchecked(node));
+            setSelectedFiles(initialSelectedFiles);
         } catch (err) {
-            setError(err.message || "An unknown error occurred");
-            setAllFiles(null);
+            setError(err.message || "An error occurred while fetching the repository structure");
+            setRepoStructure(null);
             setCommitHash('');
             setFilteredContent('');
         } finally {
@@ -66,27 +67,38 @@ const App = () => {
         }
     };
 
-    const applyFilters = useCallback(() => {
-        if (!allFiles) return;
+    const handleFileSelect = useCallback((path, isSelected, isDirectory) => {
+        setSelectedFiles(prev => {
+            const newSelected = { ...prev };
+            const updateChildren = (currentPath, select) => {
+                Object.keys(newSelected).forEach(key => {
+                    if (key.startsWith(currentPath + '/')) {
+                        newSelected[key] = select;
+                    }
+                });
+            };
 
-        setIsFiltering(true);
-        const filteredFiles = Object.entries(allFiles).filter(([path, file]) => {
-            if (fileTypes.includeTypes.length > 0) {
-                return fileTypes.includeTypes.includes(file.type);
+            if (isDirectory) {
+                updateChildren(path, isSelected);
             }
-            return !fileTypes.excludeTypes.includes(file.type);
+            newSelected[path] = isSelected;
+
+            return newSelected;
         });
+    }, []);
 
-        const content = filteredFiles.map(([path, file]) => `File: ${path}\n\n${file.content}\n\n`).join('\n');
-        setFilteredContent(content);
-        setIsFiltering(false);
-    }, [allFiles, fileTypes]);
-
-    useEffect(() => {
-        if (allFiles) {
-            applyFilters();
+    const handleFetchSelectedFiles = async () => {
+        setIsLoading(true);
+        try {
+            const selectedPaths = Object.keys(selectedFiles).filter(path => selectedFiles[path]);
+            const content = await fetchSelectedFiles(repoUrl, selectedPaths, fileTypes.excludeTypes);
+            setFilteredContent(content);
+        } catch (err) {
+            setError(err.message || "An error occurred while fetching the selected files");
+        } finally {
+            setIsLoading(false);
         }
-    }, [allFiles, applyFilters]);
+    };
 
     const handleCopyToClipboard = () => {
         navigator.clipboard.writeText(filteredContent).then(() => {
@@ -95,6 +107,46 @@ const App = () => {
             console.error('Could not copy text: ', err);
         });
     };
+
+    const getAvailableFileTypes = useCallback((structure) => {
+        const types = new Set();
+        const traverse = (node) => {
+            if (node.type === 'file') {
+                const extension = `.${node.name.split('.').pop()}`;
+                types.add(extension);
+            } else if (node.type === 'directory') {
+                node.children.forEach(traverse);
+            }
+        };
+        structure.forEach(traverse);
+        return Array.from(types);
+    }, []);
+
+    const updateSelectedFilesBasedOnTypes = useCallback(() => {
+        if (!repoStructure) return;
+
+        setSelectedFiles(prev => {
+            const newSelectedFiles = { ...prev };
+            const traverse = (node, path = '') => {
+                const currentPath = path ? `${path}/${node.name}` : node.name;
+                if (node.type === 'file') {
+                    const extension = `.${node.name.split('.').pop()}`;
+                    const shouldBeSelected = fileTypes.includeTypes.length === 0 || fileTypes.includeTypes.includes(extension);
+                    const shouldBeExcluded = fileTypes.excludeTypes.includes(extension);
+                    newSelectedFiles[currentPath] = shouldBeSelected && !shouldBeExcluded;
+                } else if (node.type === 'directory') {
+                    node.children.forEach(child => traverse(child, currentPath));
+                }
+            };
+
+            repoStructure.forEach(node => traverse(node));
+            return newSelectedFiles;
+        });
+    }, [repoStructure, fileTypes]);
+
+    useEffect(() => {
+        updateSelectedFilesBasedOnTypes();
+    }, [fileTypes, updateSelectedFilesBasedOnTypes]);
 
     return (
         <Container maxWidth="md">
@@ -121,36 +173,57 @@ const App = () => {
                     sx={{ mt: 2 }}
                     disabled={isLoading}
                 >
-                    {isLoading ? 'Fetching...' : 'Fetch Repository'}
+                    {isLoading ? 'Fetching...' : 'Fetch Repository Structure'}
                 </Button>
             </Box>
+
             {isLoading && (
                 <Box sx={{ width: '100%', mb: 2 }}>
                     <LinearProgress />
-                    <Typography variant="body2" sx={{ mt: 1 }}>Fetching repository contents...</Typography>
+                    <Typography variant="body2" sx={{ mt: 1 }}>
+                        {filteredContent ? 'Fetching selected files...' : 'Fetching repository structure...'}
+                    </Typography>
                 </Box>
             )}
+
             {commitHash && (
                 <Typography variant="body2" sx={{ mt: 2, mb: 2 }}>
                     Commit Hash: {commitHash}
                 </Typography>
             )}
-            {allFiles && (
+
+            {repoStructure && (
                 <>
                     <FileTypeSelector
                         onSelectionChange={setFileTypes}
-                        availableTypes={[...new Set(Object.values(allFiles).map(file => file.type))]}
+                        availableTypes={getAvailableFileTypes(repoStructure)}
                     />
-                    {isFiltering && <Typography variant="body2">Applying filters...</Typography>}
+                    <FileTree
+                        files={repoStructure}
+                        selectedFiles={selectedFiles}
+                        onFileSelect={handleFileSelect}
+                        excludedTypes={fileTypes.excludeTypes}
+                    />
+                    <Button
+                        variant="contained"
+                        color="primary"
+                        onClick={handleFetchSelectedFiles}
+                        sx={{ mt: 2 }}
+                        disabled={isLoading || Object.keys(selectedFiles).filter(key => selectedFiles[key]).length === 0}
+                    >
+                        Fetch Selected Files
+                    </Button>
                 </>
             )}
+
             {error && (
                 <Typography color="error" sx={{ mb: 2 }}>
                     Error: {error}
                 </Typography>
             )}
+
             {filteredContent && (
-                <Box>
+                <Box sx={{ mt: 4 }}>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                         <Typography variant="h6">Filtered Content:</Typography>
                         <Button
@@ -167,6 +240,7 @@ const App = () => {
                     </pre>
                 </Box>
             )}
+
             <Snackbar
                 anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
                 open={showCopyNotification}

@@ -15,91 +15,89 @@ class GitHubService:
         parsed_url = urlparse(repo_url)
         path_parts = parsed_url.path.strip("/").split("/")
         owner, repo = path_parts[0], path_parts[1]
-        commit_hash = None
-        if len(path_parts) > 3 and path_parts[2] == "tree":
-            commit_hash = path_parts[3]
-        return owner, repo, commit_hash
+        branch = "main"  # Default to 'main', but we'll fetch the default branch later
+        return owner, repo, branch
 
     @lru_cache(maxsize=100)
-    def get_repo_contents(self, repo_url, commit_hash):
-        owner, repo, _ = self.parse_github_url(repo_url)
-
-        if not commit_hash:
-            commits_url = f"{self.api_base_url}/repos/{owner}/{repo}/commits"
-            response = requests.get(commits_url, headers=self.headers)
-            response.raise_for_status()
-            commit_hash = response.json()[0]["sha"]
-
-        tree_url = f"{self.api_base_url}/repos/{owner}/{repo}/git/trees/{commit_hash}?recursive=1"
-        response = requests.get(tree_url, headers=self.headers)
+    def get_default_branch(self, owner, repo):
+        url = f"{self.api_base_url}/repos/{owner}/{repo}"
+        response = requests.get(url, headers=self.headers)
         response.raise_for_status()
-        tree = response.json()
+        return response.json()["default_branch"]
 
-        contents = []
-        for item in tree["tree"]:
-            if item["type"] == "blob" and item.get("size", 0) <= self.max_file_size:
-                contents.append(
-                    {
-                        "name": item["path"].split("/")[-1],
-                        "path": item["path"],
-                        "sha": item["sha"],
-                        "size": item.get("size", 0),
-                        "type": "file",
-                    }
-                )
+    def get_repo_structure(self, repo_url):
+        owner, repo, _ = self.parse_github_url(repo_url)
+        branch = self.get_default_branch(owner, repo)
 
-        return contents
+        def fetch_tree(sha, path=""):
+            url = f"{self.api_base_url}/repos/{owner}/{repo}/git/trees/{sha}"
+            response = requests.get(url, headers=self.headers)
+            response.raise_for_status()
+            tree = response.json()
 
-    @lru_cache(maxsize=1000)
-    def get_file_content(self, owner, repo, file_path, commit_hash):
-        url = f"{self.api_base_url}/repos/{owner}/{repo}/contents/{file_path}?ref={commit_hash}"
+            structure = []
+            for item in tree["tree"]:
+                if item["type"] == "tree":
+                    structure.append(
+                        {
+                            "name": item["path"],
+                            "type": "directory",
+                            "children": fetch_tree(
+                                item["sha"], f"{path}/{item['path']}"
+                            ),
+                        }
+                    )
+                elif (
+                    item["type"] == "blob" and item.get("size", 0) <= self.max_file_size
+                ):
+                    structure.append(
+                        {
+                            "name": item["path"],
+                            "type": "file",
+                            "size": item.get("size", 0),
+                            "path": f"{path}/{item['path']}".lstrip("/"),
+                        }
+                    )
+
+            return structure
+
+        commit_url = f"{self.api_base_url}/repos/{owner}/{repo}/commits/{branch}"
+        commit_response = requests.get(commit_url, headers=self.headers)
+        commit_response.raise_for_status()
+        commit_data = commit_response.json()
+        commit_hash = commit_data["sha"]
+        tree_sha = commit_data["commit"]["tree"]["sha"]
+
+        structure = fetch_tree(tree_sha)
+        return structure, commit_hash
+
+    def get_file_content(self, owner, repo, file_path, ref):
+        url = f"{self.api_base_url}/repos/{owner}/{repo}/contents/{file_path}?ref={ref}"
         response = requests.get(url, headers=self.headers)
         response.raise_for_status()
         content = response.json()["content"]
-        decoded_content = base64.b64decode(content)
+        decoded_content = base64.b64decode(content).decode("utf-8")
+        return decoded_content
 
-        # Try to decode as UTF-8, if it fails, return as binary
-        try:
-            return decoded_content.decode("utf-8")
-        except UnicodeDecodeError:
-            return f"Binary file: {file_path} (size: {len(decoded_content)} bytes)"
+    def get_selected_files(self, repo_url, selected_paths, excluded_types):
+        owner, repo, _ = self.parse_github_url(repo_url)
+        branch = self.get_default_branch(owner, repo)
 
-    def get_repo_data(self, repo_url):
-        owner, repo, commit_hash = self.parse_github_url(repo_url)
+        contents = []
+        for path in selected_paths:
+            if any(path.endswith(ext) for ext in excluded_types):
+                continue
+            try:
+                content = self.get_file_content(owner, repo, path, branch)
+                contents.append(f"File: {path}\n\n{content}\n\n")
+            except Exception as e:
+                contents.append(f"Error fetching file {path}: {str(e)}\n\n")
 
-        if not commit_hash:
-            commits_url = f"{self.api_base_url}/repos/{owner}/{repo}/commits"
-            response = requests.get(commits_url, headers=self.headers)
-            response.raise_for_status()
-            commit_hash = response.json()[0]["sha"]
+        return "\n".join(contents)
 
-        contents = self.get_repo_contents(repo_url, commit_hash)
-
-        file_contents = {}
-        for file in contents:
-            if file["type"] == "file":
-                try:
-                    content = self.get_file_content(
-                        owner, repo, file["path"], commit_hash
-                    )
-                    file_contents[file["path"]] = {
-                        "content": content,
-                        "type": (
-                            "." + file["name"].split(".")[-1]
-                            if "." in file["name"]
-                            else ""
-                        ),
-                        "size": file["size"],
-                    }
-                except Exception as e:
-                    file_contents[file["path"]] = {
-                        "content": f"Error fetching file: {str(e)}",
-                        "type": (
-                            "." + file["name"].split(".")[-1]
-                            if "." in file["name"]
-                            else ""
-                        ),
-                        "size": file["size"],
-                    }
-
-        return file_contents, commit_hash
+    @lru_cache(maxsize=100)
+    def get_repo_languages(self, owner, repo):
+        url = f"{self.api_base_url}/repos/{owner}/{repo}/languages"
+        response = requests.get(url, headers=self.headers)
+        response.raise_for_status()
+        return list(response.json().keys())

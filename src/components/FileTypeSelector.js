@@ -25,10 +25,11 @@ const FileTypeSelector = ({ onSelectionChange, availableTypes }) => {
 
     const handleCustomTypeAdd = () => {
         if (customType && !availableTypes.includes(customType)) {
+            const formattedType = customType.startsWith('.') ? customType : `.${customType}`;
             if (addToInclude) {
-                setIncludeTypes(prev => [...prev, customType]);
+                setIncludeTypes(prev => [...prev, formattedType]);
             } else {
-                setExcludeTypes(prev => [...prev, customType]);
+                setExcludeTypes(prev => [...prev, formattedType]);
             }
             setCustomType('');
         }
