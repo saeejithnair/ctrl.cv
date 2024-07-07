@@ -3,7 +3,7 @@ import { Container, Typography, TextField, Button, Box, LinearProgress, Snackbar
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import FileTypeSelector from './components/FileTypeSelector';
 import FileTree from './components/FileTree';
-import { fetchRepoStructure, fetchSelectedFiles } from './services/api';
+import { fetchRepoStructure, fetchSelectedFiles } from './services/github-graphql-service';
 
 const Logo = () => (
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 100" style={{ width: '200px', height: 'auto' }}>
@@ -42,20 +42,22 @@ const App = () => {
         setIsLoading(true);
 
         try {
-            const data = await fetchRepoStructure(repoUrl);
-            setRepoStructure(data.structure);
-            setCommitHash(data.commitHash);
+            const { structure, commitHash } = await fetchRepoStructure(repoUrl);
+            setRepoStructure(structure);
+            setCommitHash(commitHash);
+
             // Initialize all files as unchecked
             const initialSelectedFiles = {};
-            const initializeUnchecked = (node, path = '') => {
-                const currentPath = path ? `${path}/${node.name}` : node.name;
-                if (node.type === 'file') {
-                    initialSelectedFiles[currentPath] = false;
-                } else if (node.type === 'directory') {
-                    node.children.forEach(child => initializeUnchecked(child, currentPath));
-                }
+            const initializeUnchecked = (nodes) => {
+                nodes.forEach(node => {
+                    if (node.type === 'file') {
+                        initialSelectedFiles[node.path] = false;
+                    } else if (node.type === 'directory') {
+                        initializeUnchecked(node.children);
+                    }
+                });
             };
-            data.structure.forEach(node => initializeUnchecked(node));
+            initializeUnchecked(structure);
             setSelectedFiles(initialSelectedFiles);
         } catch (err) {
             setError(err.message || "An error occurred while fetching the repository structure");
@@ -70,29 +72,51 @@ const App = () => {
     const handleFileSelect = useCallback((path, isSelected, isDirectory) => {
         setSelectedFiles(prev => {
             const newSelected = { ...prev };
-            const updateChildren = (currentPath, select) => {
-                Object.keys(newSelected).forEach(key => {
-                    if (key.startsWith(currentPath + '/')) {
-                        newSelected[key] = select;
+            const updateChildren = (nodes, currentPath, select) => {
+                nodes.forEach(node => {
+                    const nodePath = `${currentPath}/${node.name}`;
+                    if (node.type === 'file') {
+                        newSelected[nodePath] = select;
+                    } else if (node.type === 'directory') {
+                        updateChildren(node.children, nodePath, select);
                     }
                 });
             };
 
             if (isDirectory) {
-                updateChildren(path, isSelected);
+                const node = findNodeByPath(repoStructure, path);
+                if (node) {
+                    updateChildren(node.children, path, isSelected);
+                }
             }
             newSelected[path] = isSelected;
 
             return newSelected;
         });
-    }, []);
+    }, [repoStructure]);
+
+    const findNodeByPath = (nodes, path) => {
+        for (const node of nodes) {
+            if (node.path === path) {
+                return node;
+            }
+            if (node.type === 'directory' && path.startsWith(node.path)) {
+                const found = findNodeByPath(node.children, path);
+                if (found) return found;
+            }
+        }
+        return null;
+    };
 
     const handleFetchSelectedFiles = async () => {
         setIsLoading(true);
         try {
             const selectedPaths = Object.keys(selectedFiles).filter(path => selectedFiles[path]);
-            const content = await fetchSelectedFiles(repoUrl, selectedPaths, fileTypes.excludeTypes);
-            setFilteredContent(content);
+            const fileContents = await fetchSelectedFiles(repoUrl, selectedPaths, fileTypes.excludeTypes);
+            const concatenatedContent = Object.entries(fileContents)
+                .map(([path, content]) => `File: ${path}\n\n${content}\n\n`)
+                .join('---\n\n');
+            setFilteredContent(concatenatedContent);
         } catch (err) {
             setError(err.message || "An error occurred while fetching the selected files");
         } finally {
@@ -110,15 +134,17 @@ const App = () => {
 
     const getAvailableFileTypes = useCallback((structure) => {
         const types = new Set();
-        const traverse = (node) => {
-            if (node.type === 'file') {
-                const extension = `.${node.name.split('.').pop()}`;
-                types.add(extension);
-            } else if (node.type === 'directory') {
-                node.children.forEach(traverse);
-            }
+        const traverse = (nodes) => {
+            nodes.forEach(node => {
+                if (node.type === 'file') {
+                    const extension = `.${node.name.split('.').pop()}`;
+                    types.add(extension);
+                } else if (node.type === 'directory') {
+                    traverse(node.children);
+                }
+            });
         };
-        structure.forEach(traverse);
+        traverse(structure);
         return Array.from(types);
     }, []);
 
@@ -127,19 +153,20 @@ const App = () => {
 
         setSelectedFiles(prev => {
             const newSelectedFiles = { ...prev };
-            const traverse = (node, path = '') => {
-                const currentPath = path ? `${path}/${node.name}` : node.name;
-                if (node.type === 'file') {
-                    const extension = `.${node.name.split('.').pop()}`;
-                    const shouldBeSelected = fileTypes.includeTypes.length === 0 || fileTypes.includeTypes.includes(extension);
-                    const shouldBeExcluded = fileTypes.excludeTypes.includes(extension);
-                    newSelectedFiles[currentPath] = shouldBeSelected && !shouldBeExcluded;
-                } else if (node.type === 'directory') {
-                    node.children.forEach(child => traverse(child, currentPath));
-                }
+            const traverse = (nodes) => {
+                nodes.forEach(node => {
+                    if (node.type === 'file') {
+                        const extension = `.${node.name.split('.').pop()}`;
+                        const shouldBeSelected = fileTypes.includeTypes.length === 0 || fileTypes.includeTypes.includes(extension);
+                        const shouldBeExcluded = fileTypes.excludeTypes.includes(extension);
+                        newSelectedFiles[node.path] = shouldBeSelected && !shouldBeExcluded;
+                    } else if (node.type === 'directory') {
+                        traverse(node.children);
+                    }
+                });
             };
 
-            repoStructure.forEach(node => traverse(node));
+            traverse(repoStructure);
             return newSelectedFiles;
         });
     }, [repoStructure, fileTypes]);
