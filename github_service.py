@@ -15,8 +15,10 @@ class GitHubService:
         parsed_url = urlparse(repo_url)
         path_parts = parsed_url.path.strip("/").split("/")
         owner, repo = path_parts[0], path_parts[1]
-        branch = "main"  # Default to 'main', but we'll fetch the default branch later
-        return owner, repo, branch
+        commit_hash = None
+        if len(path_parts) > 4 and path_parts[2] == "tree":
+            commit_hash = path_parts[4]
+        return owner, repo, commit_hash
 
     @lru_cache(maxsize=100)
     def get_default_branch(self, owner, repo):
@@ -25,9 +27,18 @@ class GitHubService:
         response.raise_for_status()
         return response.json()["default_branch"]
 
-    def get_repo_structure(self, repo_url):
-        owner, repo, _ = self.parse_github_url(repo_url)
-        branch = self.get_default_branch(owner, repo)
+    def get_repo_structure(self, repo_url, commit_hash=None):
+        owner, repo, url_commit_hash = self.parse_github_url(repo_url)
+        commit_hash = commit_hash or url_commit_hash
+
+        if not commit_hash:
+            default_branch = self.get_default_branch(owner, repo)
+            commit_url = (
+                f"{self.api_base_url}/repos/{owner}/{repo}/commits/{default_branch}"
+            )
+            commit_response = requests.get(commit_url, headers=self.headers)
+            commit_response.raise_for_status()
+            commit_hash = commit_response.json()["sha"]
 
         def fetch_tree(sha, path=""):
             url = f"{self.api_base_url}/repos/{owner}/{repo}/git/trees/{sha}"
@@ -61,12 +72,11 @@ class GitHubService:
 
             return structure
 
-        commit_url = f"{self.api_base_url}/repos/{owner}/{repo}/commits/{branch}"
-        commit_response = requests.get(commit_url, headers=self.headers)
-        commit_response.raise_for_status()
-        commit_data = commit_response.json()
-        commit_hash = commit_data["sha"]
-        tree_sha = commit_data["commit"]["tree"]["sha"]
+        tree_url = f"{self.api_base_url}/repos/{owner}/{repo}/git/trees/{commit_hash}"
+        tree_response = requests.get(tree_url, headers=self.headers)
+        tree_response.raise_for_status()
+        tree_data = tree_response.json()
+        tree_sha = tree_data["sha"]
 
         structure = fetch_tree(tree_sha)
         return structure, commit_hash
@@ -79,16 +89,20 @@ class GitHubService:
         decoded_content = base64.b64decode(content).decode("utf-8")
         return decoded_content
 
-    def get_selected_files(self, repo_url, selected_paths, excluded_types):
-        owner, repo, _ = self.parse_github_url(repo_url)
-        branch = self.get_default_branch(owner, repo)
+    def get_selected_files(
+        self, repo_url, selected_paths, excluded_types, commit_hash=None
+    ):
+        owner, repo, url_commit_hash = self.parse_github_url(repo_url)
+        commit_hash = (
+            commit_hash or url_commit_hash or self.get_default_branch(owner, repo)
+        )
 
         contents = []
         for path in selected_paths:
             if any(path.endswith(ext) for ext in excluded_types):
                 continue
             try:
-                content = self.get_file_content(owner, repo, path, branch)
+                content = self.get_file_content(owner, repo, path, commit_hash)
                 contents.append(f"File: {path}\n\n{content}\n\n")
             except Exception as e:
                 contents.append(f"Error fetching file {path}: {str(e)}\n\n")

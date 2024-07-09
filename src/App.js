@@ -36,15 +36,23 @@ const App = () => {
     const [showCopyNotification, setShowCopyNotification] = useState(false);
     const [commitHash, setCommitHash] = useState('');
 
+    const extractCommitHash = (url) => {
+        const match = url.match(/\/tree\/([a-f0-9]+)/);
+        return match ? match[1] : null;
+    };
+
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
         setIsLoading(true);
 
+        const extractedCommitHash = extractCommitHash(repoUrl);
+        setCommitHash(extractedCommitHash || 'Fetching...');
+
         try {
-            const data = await fetchRepoStructure(repoUrl);
+            const data = await fetchRepoStructure(repoUrl, extractedCommitHash);
             setRepoStructure(data.structure);
-            setCommitHash(data.commitHash);
+            setCommitHash(extractedCommitHash || data.commitHash);
             // Initialize all files as unchecked
             const initialSelectedFiles = {};
             const initializeUnchecked = (node, path = '') => {
@@ -91,7 +99,7 @@ const App = () => {
         setIsLoading(true);
         try {
             const selectedPaths = Object.keys(selectedFiles).filter(path => selectedFiles[path]);
-            const content = await fetchSelectedFiles(repoUrl, selectedPaths, fileTypes.excludeTypes);
+            const content = await fetchSelectedFiles(repoUrl, selectedPaths, fileTypes.excludeTypes, commitHash);
             setFilteredContent(content);
         } catch (err) {
             setError(err.message || "An error occurred while fetching the selected files");
@@ -161,7 +169,7 @@ const App = () => {
                     fullWidth
                     value={repoUrl}
                     onChange={(e) => setRepoUrl(e.target.value)}
-                    placeholder="Enter GitHub repository URL"
+                    placeholder="Enter GitHub repository URL (with optional commit hash)"
                     variant="outlined"
                     sx={{ mb: 2 }}
                 />

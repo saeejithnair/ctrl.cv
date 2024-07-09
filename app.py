@@ -19,12 +19,15 @@ github_service = GitHubService(os.getenv("GITHUB_TOKEN"))
 def fetch_repo_structure():
     data = request.json
     repo_url = data.get("repo_url")
+    commit_hash = data.get("commit_hash")
 
     if not repo_url:
         return jsonify({"error": "Repository URL is required"}), 400
 
     try:
-        structure, commit_hash = github_service.get_repo_structure(repo_url)
+        structure, commit_hash = github_service.get_repo_structure(
+            repo_url, commit_hash
+        )
         return jsonify({"structure": structure, "commit_hash": commit_hash})
     except Exception as e:
         return jsonify({"error": f"Error fetching repository structure: {str(e)}"}), 500
@@ -36,13 +39,14 @@ def fetch_selected_files():
     repo_url = data.get("repo_url")
     selected_paths = data.get("selected_paths")
     excluded_types = data.get("excluded_types", [])
+    commit_hash = data.get("commit_hash")
 
     if not repo_url or not selected_paths:
         return jsonify({"error": "Repository URL and selected paths are required"}), 400
 
     try:
         content = github_service.get_selected_files(
-            repo_url, selected_paths, excluded_types
+            repo_url, selected_paths, excluded_types, commit_hash
         )
         return jsonify({"content": content})
     except Exception as e:
